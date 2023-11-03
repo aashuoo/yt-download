@@ -1,0 +1,81 @@
+from pytube import YouTube
+from telebot import TeleBot
+from telebot import types
+from pathlib import Path
+import re
+
+bot = TeleBot("6846708113:AAEd2T2zY9i4Z89dQjDO3Vz3P-06BFi0bA4")
+
+active_downloads = {}
+
+@bot.message_handler(commands=["start"])
+def ask_for_link(message):
+    dev = types.InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/tgfreeview")
+    channel = types.InlineKeyboardButton("📣 Channel", url="https://t.me/tgfreeview")
+    chat = types.InlineKeyboardButton("👥 Chat", url="https://t.me/tgfreeview")
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(dev)
+    markup.add(channel, chat)
+    bot.send_message(message.chat.id, """*🚀 Welcome to the YouTube Video Downloader Bot!
+
+📥 This bot allows you to easily download YouTube videos. Simply send the link of the video you want to download, and the bot will take care of the rest.
+
+🔧 Here's how to use the bot:
+1. Send the YouTube video link that you want to download.
+2. Wait for the bot to process the download.
+3. Once the download is complete, the bot will send you the video.
+
+📌 Please note:
+⋅ Videos longer than 15 minutes cannot be downloaded.
+∙ Only public videos can be downloaded.
+∙ The bot may not work properly with age-restricted or private videos.
+
+🎉 Enjoy downloading your favorite YouTube videos!*""", parse_mode="Markdown", reply_markup=markup)
+
+@bot.message_handler(func=lambda message: True)
+def download_and_send_video(message):
+    try:
+        user_id = message.from_user.id
+        if user_id in active_downloads:
+            bot.send_message(message.chat.id, "🕐 *Another video download is in progress. Please wait.*", parse_mode="Markdown")
+            return
+
+        link = message.text
+        if "youtu.be" in link:
+            video_id = re.search(r"youtu.be/([^?]+)", link).group(1)
+            link = f"https://www.youtube.com/watch?v={video_id}"
+        if not re.match(r'^(https?://)?(www\.)?youtube\.com/watch\?v=[\w-]+(&\S*)?$', link):
+            bot.send_message(message.chat.id, "❌ *Please send a valid link.*", parse_mode="Markdown")
+            return
+        yt = YouTube(link)
+        if yt.length > 900:
+            bot.send_message(message.chat.id, "⏰ *Videos longer than 15 minutes cannot be downloaded.*", parse_mode="Markdown")
+            return
+
+        def show_progress(stream, chunk, bytes_remaining):
+            percent = round((1 - bytes_remaining / stream.filesize) * 100, 1)
+            global msg
+            if percent % 1 == 0:
+                try:
+                    if 'msg' in globals():
+                        bot.edit_message_text(f"📥 *Video is {percent}% downloaded...*", message.chat.id, msg.message_id, parse_mode="Markdown")
+                    else:
+                        msg = bot.send_message(message.chat.id, f"📥 *Video is {percent}% downloaded...*", parse_mode="Markdown")
+
+                except:
+                    pass
+        started_message = bot.send_message(message.chat.id, "📥 *Downloading started!*", parse_mode="Markdown")
+        active_downloads[user_id] = True
+        video = yt.streams.get_highest_resolution().download(Path("./tmp")) 
+        bot.delete_message(message.chat.id, started_message.message_id)
+        bot.send_message(message.chat.id, "✅ *Video download process successfully completed! Sending the video...*", parse_mode="Markdown")
+        bot.send_chat_action(message.chat.id, "upload_video")
+
+        with open(video, "rb") as video_file:
+            bot.send_video(message.chat.id, video_file)
+        Path(video).unlink()
+        del active_downloads[user_id]
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ *An error occurred:* `{e}`\n*Please Try Again*", parse_mode="Markdown")
+
+bot.infinity_polling()
